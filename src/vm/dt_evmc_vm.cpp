@@ -490,6 +490,7 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
   //  - high density of RA-expensive opcodes (SHL/SHR/SAR/MUL/SIGNEXTEND)
   //  - long consecutive runs of RA-expensive ops
   //  - DUP-induced feedback loops (b0 pattern)
+  //  - excessive JUMPDEST count (each creates a BB in the jump table)
   std::unique_ptr<ScopedConfig> TempConfig;
   if (VM->Config.Mode == RunMode::MultipassMode) {
     COMPILER::EVMAnalyzer Analyzer(Rev);

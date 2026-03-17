@@ -109,6 +109,7 @@ struct JITSuitabilityResult {
   size_t MaxConsecutiveExpensive = 0; // longest unbroken run
   size_t MaxBlockExpensiveCount = 0;  // max RA-expensive ops in one block
   size_t DupFeedbackPatternCount = 0; // DUPn immediately before RA-expensive
+  size_t JumpDestCount = 0;           // total JUMPDEST targets (basic blocks)
 };
 
 /// Thresholds for JIT suitability fallback.  Normal contracts have <20
@@ -118,6 +119,10 @@ static constexpr size_t MAX_JIT_MIR_ESTIMATE = 50000;
 static constexpr size_t MAX_CONSECUTIVE_RA_EXPENSIVE = 128;
 static constexpr size_t MAX_BLOCK_RA_EXPENSIVE = 256;
 static constexpr size_t MAX_DUP_FEEDBACK_PATTERN = 64;
+/// Each JUMPDEST creates a basic block with entry thunks in the jump table,
+/// causing O(n) BBs that make register allocation superlinear.  Normal
+/// contracts have <200 JUMPDESTs; adversarial bytecodes can have thousands.
+static constexpr size_t MAX_JUMPDEST_COUNT = 512;
 
 class EVMAnalyzer {
   using Byte = zen::common::Byte;
@@ -264,6 +269,7 @@ public:
         CurInfo = BlockInfo(PC);
         if (Opcode == OP_JUMPDEST) {
           CurInfo.IsJumpDest = true;
+          JITResult.JumpDestCount++;
         }
         // Block boundary also ends a consecutive run
         JITResult.MaxConsecutiveExpensive = std::max(
@@ -311,7 +317,8 @@ public:
         JITResult.MirEstimate > MAX_JIT_MIR_ESTIMATE ||
         JITResult.MaxConsecutiveExpensive > MAX_CONSECUTIVE_RA_EXPENSIVE ||
         JITResult.MaxBlockExpensiveCount > MAX_BLOCK_RA_EXPENSIVE ||
-        JITResult.DupFeedbackPatternCount > MAX_DUP_FEEDBACK_PATTERN;
+        JITResult.DupFeedbackPatternCount > MAX_DUP_FEEDBACK_PATTERN ||
+        JITResult.JumpDestCount > MAX_JUMPDEST_COUNT;
 
     return true;
   }
