@@ -138,7 +138,12 @@ if(ZEN_ENABLE_SPEC_TEST)
         )
         target_link_libraries(
           evmStateTests
-          PRIVATE dtvmcore rapidjson mpt gtest_main -fsanitize=address
+          PRIVATE dtvmcore
+                  rapidjson
+                  mpt
+                  gtest_main
+                  CLI11::CLI11
+                  -fsanitize=address
           PUBLIC ${GTEST_BOTH_LIBRARIES}
         )
         if(ZEN_ENABLE_LIBEVM)
@@ -205,6 +210,7 @@ if(ZEN_ENABLE_SPEC_TEST)
                   rapidjson
                   mpt
                   gtest_main
+                  CLI11::CLI11
                   -fsanitize=address
                   -static-libasan
           PUBLIC ${GTEST_BOTH_LIBRARIES}
@@ -259,7 +265,7 @@ if(ZEN_ENABLE_SPEC_TEST)
       )
       target_link_libraries(
         evmStateTests
-        PRIVATE dtvmcore rapidjson mpt gtest_main
+        PRIVATE dtvmcore rapidjson mpt gtest_main CLI11::CLI11
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
       if(ZEN_ENABLE_LIBEVM)
@@ -301,7 +307,11 @@ if(ZEN_ENABLE_SPEC_TEST)
         ${CMAKE_COMMAND} -DTEST_EXECUTABLE=$<TARGET_FILE:solidityContractTests>
         -P ${CMAKE_CURRENT_SOURCE_DIR}/RunSpecTests.cmake
     )
-    add_test(NAME evmStateTests COMMAND evmStateTests)
+    add_test(
+      NAME evmStateTests
+      COMMAND ${CMAKE_COMMAND} -DTEST_EXECUTABLE=$<TARGET_FILE:evmStateTests>
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/RunSpecTests.cmake
+    )
     if(ZEN_ENABLE_LIBEVM)
       add_test(NAME evmFallbackExecutionTests COMMAND evmFallbackExecutionTests)
       add_test(NAME evmModuleCacheTests COMMAND evmModuleCacheTests)

@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "evm/evm.h"
+#include "evm_test_cli.h"
 #include "evm_test_fixtures.h"
 #include "evm_test_helpers.h"
 #include "evm_test_host.hpp"
+#include "zetaengine.h"
 
+#include <CLI/CLI.hpp>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -16,10 +19,16 @@ using namespace zen::evm;
 using namespace zen::utils;
 using namespace zen::evm_test_utils;
 
-namespace {
+// Global configuration set by main() before RUN_ALL_TESTS().
+static zen::runtime::RuntimeConfig &GetGlobalConfig() {
+  static zen::runtime::RuntimeConfig Config;
+  return Config;
+}
+static evmc_revision GlobalTargetRevision = EVMC_CANCUN;
+static uint64_t GlobalGasLimit = UINT64_MAX;
+static std::string GlobalTestDir;
 
-// TODO: RunMode selection logic will be refactored in the future.
-constexpr auto STATE_TEST_RUN_MODE = common::RunMode::InterpMode;
+namespace {
 
 struct TxIntrinsicCost {
   int64_t Intrinsic = 0;
@@ -86,86 +95,6 @@ TxIntrinsicCost computeTxIntrinsicCost(const evmc_revision Revision,
 
   return {IntrinsicCost, MinCost};
 }
-
-// Revision filter configuration
-// Set to EVMC_MAX_REVISION to run all tests, or a specific revision to filter
-evmc_revision getTargetRevision() {
-  static const std::unordered_map<std::string, evmc_revision> RevisionMap = {
-      {"ALL", EVMC_MAX_REVISION},
-      {"Frontier", EVMC_FRONTIER},
-      {"Homestead", EVMC_HOMESTEAD},
-      {"TangerineWhistle", EVMC_TANGERINE_WHISTLE},
-      {"SpuriousDragon", EVMC_SPURIOUS_DRAGON},
-      {"Byzantium", EVMC_BYZANTIUM},
-      {"Constantinople", EVMC_CONSTANTINOPLE},
-      {"Petersburg", EVMC_PETERSBURG},
-      {"Istanbul", EVMC_ISTANBUL},
-      {"Berlin", EVMC_BERLIN},
-      {"London", EVMC_LONDON},
-      {"Paris", EVMC_PARIS},
-      {"Shanghai", EVMC_SHANGHAI},
-      {"Cancun", EVMC_CANCUN},
-      {"Prague", EVMC_PRAGUE},
-  };
-
-  const char *EnvRevision = std::getenv("DTVM_TEST_REVISION");
-  if (EnvRevision != nullptr) {
-    std::string RevisionStr = EnvRevision;
-    auto It = RevisionMap.find(RevisionStr);
-    if (It != RevisionMap.end()) {
-      return It->second;
-    }
-  }
-  // Default: only test Cancun revision
-  return EVMC_CANCUN;
-}
-
-RuntimeConfig buildRuntimeConfig() {
-  RuntimeConfig Config;
-
-  const bool MultipassSupported =
-#ifdef ZEN_ENABLE_MULTIPASS_JIT
-      true;
-#else
-      false;
-#endif
-
-  if (STATE_TEST_RUN_MODE == common::RunMode::MultipassMode &&
-      !MultipassSupported) {
-#ifndef NDEBUG
-    std::cerr << "Multipass requested but not built, falling back to "
-                 "interpreter"
-              << std::endl;
-#endif // NDEBUG
-    Config.Mode = common::RunMode::InterpMode;
-  } else {
-    Config.Mode = STATE_TEST_RUN_MODE;
-    if (Config.Mode == common::RunMode::UnknownMode) {
-      Config.Mode = MultipassSupported ? common::RunMode::MultipassMode
-                                       : common::RunMode::InterpMode;
-    }
-  }
-
-  Config.EnableEvmGasMetering = true;
-#ifdef ZEN_ENABLE_MULTIPASS_JIT
-  Config.DisableMultipassGreedyRA = true;
-#endif
-
-  return Config;
-}
-
-std::string getDefaultTestDir() {
-  const char *EnvTestDir = std::getenv("DTVM_TEST_DIR");
-  if (EnvTestDir != nullptr && std::strlen(EnvTestDir) > 0) {
-    return std::string(EnvTestDir);
-  }
-  std::filesystem::path DirPath =
-      std::filesystem::path(__FILE__).parent_path() /
-      std::filesystem::path("../../tests/evm_spec_test/state_tests");
-  return DirPath.string();
-}
-
-const std::string DEFAULT_TEST_DIR = getDefaultTestDir();
 
 struct ExecutionResult {
   bool Passed = false;
@@ -351,7 +280,7 @@ ExecutionResult executeStateTest(const StateTestFixture &Fixture,
       }
     }
 
-    RuntimeConfig Config = buildRuntimeConfig();
+    RuntimeConfig Config = GetGlobalConfig();
 
     auto HostPtr = std::make_unique<ZenMockedEVMHost>();
 
@@ -497,13 +426,17 @@ struct StateTestCaseParam {
   std::string CaseName;
 };
 
+void PrintTo(const StateTestCaseParam &Param, std::ostream *Os) {
+  *Os << Param.CaseName;
+}
+
 const std::vector<StateTestFixture> &getStateFixtures() {
   static std::vector<StateTestFixture> Fixtures = [] {
     std::vector<StateTestFixture> Loaded;
-    auto JsonFiles = findJsonFiles(DEFAULT_TEST_DIR);
+    auto JsonFiles = findJsonFiles(GlobalTestDir);
 #ifndef NDEBUG
     std::cout << "Found " << JsonFiles.size() << " JSON test files in "
-              << DEFAULT_TEST_DIR << std::endl;
+              << GlobalTestDir << std::endl;
 #endif // NDEBUG
     int LoadErrors = 0;
     for (const auto &FilePath : JsonFiles) {
@@ -540,7 +473,7 @@ const std::vector<StateTestCaseParam> &getStateTestParams() {
     const auto &Fixtures = getStateFixtures();
 
     size_t CaseCounter = 0;
-    evmc_revision TargetRevision = getTargetRevision();
+    evmc_revision TargetRevision = GlobalTargetRevision;
 
     for (const auto &Fixture : Fixtures) {
       if (!Fixture.Post || !Fixture.Post->IsObject()) {
@@ -676,3 +609,33 @@ INSTANTIATE_TEST_SUITE_P(ExecuteAllStateTests, EVMStateTest,
                          });
 
 } // anonymous namespace
+
+GTEST_API_ int main(int argc, char **argv) {
+  CLI::App CLIParser{"EVM State Tests Command Line Interface\n",
+                     "evmStateTests"};
+  CLIParser.allow_extras();
+
+  LoggerLevel LogLevel = LoggerLevel::Info;
+  GetGlobalConfig().Format = zen::common::InputFormat::EVM;
+  GetGlobalConfig().Mode = zen::common::RunMode::InterpMode;
+  GetGlobalConfig().EnableEvmGasMetering = true;
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+  GetGlobalConfig().DisableMultipassGreedyRA = true;
+#endif
+  GlobalTestDir =
+      (std::filesystem::path(__FILE__).parent_path() /
+       std::filesystem::path("../../tests/evm_spec_test/state_tests"))
+          .string();
+
+  // Add common EVM CLI options
+  zen::test::addCommonEVMOptions(CLIParser, GetGlobalConfig(), LogLevel,
+                                 GlobalGasLimit, GlobalTargetRevision,
+                                 GlobalTestDir);
+
+  CLI11_PARSE(CLIParser, argc, argv);
+
+  zen::setGlobalLogger(createConsoleLogger("evm_state_tests_logger", LogLevel));
+
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

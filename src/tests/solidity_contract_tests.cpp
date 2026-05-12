@@ -1,6 +1,7 @@
 // Copyright (C) 2025 the DTVM authors. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+#include "evm_test_cli.h"
 #include "solidity_test_helpers.h"
 #include <CLI/CLI.hpp>
 #include <filesystem>
@@ -205,51 +206,16 @@ GTEST_API_ int main(int argc, char **argv) {
   RuntimeConfig Config;
   Config.Format = InputFormat::EVM;
   Config.Mode = RunMode::InterpMode;
+  evmc_revision Revision = EVMC_CANCUN;
 
-  const std::unordered_map<std::string, InputFormat> FormatMap = {
-      {"wasm", InputFormat::WASM},
-      {"evm", InputFormat::EVM},
-  };
-  const std::unordered_map<std::string, RunMode> ModeMap = {
-      {"interpreter", RunMode::InterpMode},
-      {"multipass", RunMode::MultipassMode},
-  };
-  const std::unordered_map<std::string, LoggerLevel> LogMap = {
-      {"trace", LoggerLevel::Trace}, {"debug", LoggerLevel::Debug},
-      {"info", LoggerLevel::Info},   {"warn", LoggerLevel::Warn},
-      {"error", LoggerLevel::Error}, {"fatal", LoggerLevel::Fatal},
-      {"off", LoggerLevel::Off},
-  };
+  // Add common EVM CLI options
+  zen::test::addCommonEVMOptions(CLIParser, Config, LogLevel, GasLimit,
+                                 Revision, TestCategory);
 
-  CLIParser.add_option("-t, --test", TestContract,
+  // Add test-specific option: specific test contract name
+  CLIParser.add_option("-t,--test", TestContract,
                        "Specific test contract name");
-  CLIParser.add_option("-c, --category", TestCategory, "Test Category");
-  CLIParser.add_option("--format", Config.Format, "Input format")
-      ->transform(CLI::CheckedTransformer(FormatMap, CLI::ignore_case));
-  CLIParser.add_option("-m, --mode", Config.Mode, "Running mode")
-      ->transform(CLI::CheckedTransformer(ModeMap, CLI::ignore_case));
-  CLIParser.add_option("--gas-limit", GasLimit, "Gas limit");
-  CLIParser.add_option("--log-level", LogLevel, "Log level")
-      ->transform(CLI::CheckedTransformer(LogMap, CLI::ignore_case));
-#ifdef ZEN_ENABLE_EVM
-  CLIParser.add_flag("--enable-evm-gas", Config.EnableEvmGasMetering,
-                     "Enable EVM gas metering when compiling EVM bytecode");
-#endif // ZEN_ENABLE_EVM
-#ifdef ZEN_ENABLE_MULTIPASS_JIT
-  CLIParser.add_flag("--disable-multipass-greedyra",
-                     Config.DisableMultipassGreedyRA,
-                     "Disable greedy register allocation of multipass JIT");
-  auto *DMMOption = CLIParser.add_flag(
-      "--disable-multipass-multithread", Config.DisableMultipassMultithread,
-      "Disable multithread compilation of multipass JIT");
-  CLIParser
-      .add_option("--num-multipass-threads", Config.NumMultipassThreads,
-                  "Number of threads for multipass JIT(set 0 for automatic "
-                  "determination)")
-      ->excludes(DMMOption);
-  CLIParser.add_flag("--enable-multipass-lazy", Config.EnableMultipassLazy,
-                     "Enable multipass lazy mode(on request compile)");
-#endif // ZEN_ENABLE_MULTIPASS_JIT
+
   CLI11_PARSE(CLIParser, argc, argv);
 
   zen::setGlobalLogger(
